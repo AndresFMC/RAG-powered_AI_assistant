@@ -1,0 +1,22 @@
+# Core RAG dependencies
+langchain==0.3.15
+langchain-community==0.3.15
+langchain-aws==0.2.14
+
+# Vector store
+pinecone-client==5.0.1
+
+# AWS Bedrock
+boto3>=1.37.0
+
+# Document processing (not needed in Lambda, but rag_core imports it)
+pypdf==4.3.1
+
+# Environment
+python-dotenv==1.0.1
+
+# LangSmith (optional, for monitoring)
+langsmith==0.1.143
+
+# Utilities
+pydantic==2.10.5

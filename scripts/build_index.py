@@ -1,18 +1,23 @@
 """
 Build Index Script - RAG Powered AI Assistant
 Indexes PDF documents into Pinecone with namespace isolation per country.
-Integrated with LangSmith for monitoring.
+Updated to use modular rag_core architecture.
 """
 
 import os
+import sys
 import time
 from pathlib import Path
+
+# Add parent directory to path to import rag_core
+sys.path.insert(0, str(Path(__file__).parent.parent))
+
 from dotenv import load_dotenv
-from pinecone import Pinecone, ServerlessSpec
 from langchain_community.document_loaders import PyPDFLoader
 from langchain_text_splitters import RecursiveCharacterTextSplitter
-from langchain_aws import BedrockEmbeddings
-import boto3
+from rag_core.factories.vector_store_factory import get_vector_store
+from rag_core.factories.embeddings_factory import get_embeddings
+from rag_core.config.settings import settings
 
 # Load environment variables
 load_dotenv()
@@ -24,45 +29,24 @@ if os.getenv('LANGSMITH_TRACING') == 'true':
     print(f"  Project: {os.getenv('LANGSMITH_PROJECT')}")
 
 # Configuration
-COUNTRIES = ['spain', 'poland', 'colombia', 'italy', 'georgia']
-DATA_DIR = Path('data')
-CHUNK_SIZE = 1000
-CHUNK_OVERLAP = 200
-EMBEDDING_DIMENSION = 1024  # Titan v2 generates 1024 dimensions
+COUNTRIES = settings.COUNTRIES
+DATA_DIR = Path(__file__).parent.parent / 'data'
+CHUNK_SIZE = settings.CHUNK_SIZE
+CHUNK_OVERLAP = settings.CHUNK_OVERLAP
+
 
 class IndexBuilder:
     def __init__(self):
-        """Initialize Pinecone and Bedrock clients."""
-        # Initialize Pinecone
-        self.pc = Pinecone(api_key=os.getenv('PINECONE_API_KEY'))
-        self.index_name = os.getenv('PINECONE_INDEX_NAME')
+        """Initialize components using factories."""
+        print("Initializing IndexBuilder...")
         
-        # Get or create index
-        self.index = self._get_or_create_index()
-        
-        # Initialize Bedrock embeddings
-        bedrock_client = boto3.client(
-            'bedrock-runtime',
-            region_name=os.getenv('AWS_REGION', 'eu-central-1')
-        )
-        
-        embedding_model = 'amazon.titan-embed-text-v2:0'
-        
-        self.embeddings = BedrockEmbeddings(
-            client=bedrock_client,
-            model_id=embedding_model
-        )
+        # Use factories to get implementations
+        self.vector_store = get_vector_store()
+        self.embeddings = get_embeddings()
         
         # Verify embedding dimensions
-        print(f"Using embedding model: {embedding_model}")
-        test_embedding = self.embeddings.embed_query("test")
-        print(f"Embedding dimensions: {len(test_embedding)}")
-        
-        if len(test_embedding) != EMBEDDING_DIMENSION:
-            raise ValueError(
-                f"Expected {EMBEDDING_DIMENSION} dimensions, got {len(test_embedding)}. "
-                f"Index is configured for {EMBEDDING_DIMENSION} dimensions."
-            )
+        embedding_dim = self.embeddings.get_dimension()
+        print(f"Embedding dimensions: {embedding_dim}")
         
         # Text splitter
         self.text_splitter = RecursiveCharacterTextSplitter(
@@ -73,27 +57,6 @@ class IndexBuilder:
         )
         
         print("✓ IndexBuilder initialized")
-    
-    def _get_or_create_index(self):
-        """Get existing index or create if it doesn't exist."""
-        existing_indexes = [idx.name for idx in self.pc.list_indexes()]
-        
-        if self.index_name not in existing_indexes:
-            print(f"Creating new index: {self.index_name}")
-            self.pc.create_index(
-                name=self.index_name,
-                dimension=EMBEDDING_DIMENSION,
-                metric='cosine',
-                spec=ServerlessSpec(
-                    cloud='aws',
-                    region='us-east-1'
-                )
-            )
-            # Wait for index to be ready
-            print("Waiting for index to be ready...")
-            time.sleep(10)
-        
-        return self.pc.Index(self.index_name)
     
     def load_and_split_pdf(self, pdf_path: Path) -> list:
         """Load PDF and split into chunks."""
@@ -149,7 +112,7 @@ class IndexBuilder:
         self.upsert_chunks(all_chunks, country)
     
     def upsert_chunks(self, chunks: list, namespace: str):
-        """Generate embeddings and upsert to Pinecone."""
+        """Generate embeddings and upsert to vector store."""
         print(f"Generating embeddings and upserting to namespace '{namespace}'...")
         
         batch_size = 100
@@ -164,7 +127,7 @@ class IndexBuilder:
             # Prepare vectors
             vectors = []
             for idx, chunk in enumerate(batch):
-                # Generate embedding
+                # Generate embedding using factory-provided embeddings
                 embedding = self.embeddings.embed_query(chunk.page_content)
                 
                 # Create vector ID
@@ -184,8 +147,8 @@ class IndexBuilder:
                     'metadata': metadata
                 })
             
-            # Upsert to Pinecone
-            self.index.upsert(
+            # Upsert using factory-provided vector store
+            self.vector_store.upsert(
                 vectors=vectors,
                 namespace=namespace
             )
@@ -201,17 +164,22 @@ class IndexBuilder:
         print("VERIFICATION")
         print(f"{'='*60}")
         
-        stats = self.index.describe_index_stats()
+        # Wait for eventual consistency
+        print("\nWaiting 30s for vector store eventual consistency...")
+        time.sleep(30)
         
-        print(f"\nIndex: {self.index_name}")
-        print(f"Total vectors: {stats.total_vector_count}")
+        stats = self.vector_store.get_stats()
+        
+        print(f"\nTotal vectors: {stats['total_vector_count']}")
         print(f"\nNamespace breakdown:")
         
-        for namespace, ns_stats in stats.namespaces.items():
-            print(f"  • {namespace}: {ns_stats.vector_count} vectors")
+        for namespace, ns_stats in stats['namespaces'].items():
+            print(f"  • {namespace}: {ns_stats['vector_count']} vectors")
         
         # Check if all countries are present
-        missing = set(COUNTRIES) - set(stats.namespaces.keys())
+        existing_namespaces = set(stats['namespaces'].keys())
+        missing = set(COUNTRIES) - existing_namespaces
+        
         if missing:
             print(f"\n⚠ Missing namespaces: {missing}")
         else:
@@ -231,6 +199,8 @@ class IndexBuilder:
                 self.process_country(country)
             except Exception as e:
                 print(f"\n✗ Error processing {country}: {str(e)}")
+                import traceback
+                traceback.print_exc()
                 continue
         
         # Verify indexing
@@ -248,6 +218,8 @@ def main():
         builder.run()
     except Exception as e:
         print(f"\n✗ Fatal error: {str(e)}")
+        import traceback
+        traceback.print_exc()
         raise
 
 
