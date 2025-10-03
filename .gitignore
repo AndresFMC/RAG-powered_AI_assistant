@@ -1,5 +1,40 @@
-/data
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+venv/
+ENV/
+env/
+.venv
 
+# Environment variables
+.env
+.env.local
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Project specific
+*.log
+.pytest_cache/
+.coverage
+htmlcov/
+
+# AWS
+.aws-sam/
+
+# Pinecone
+pinecone_index_stats.json
 
 # Byte-compiled / optimized / DLL files
 __pycache__/
