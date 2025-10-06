@@ -598,6 +598,24 @@ See [test_results.md](test_results.md) for comprehensive test report.
 
 **Decision:** Pinecone with namespace-per-country architecture ensures impossible cross-contamination while maintaining cloud-agnostic design.
 
+### Why No SQL Database?
+
+**Evaluation:** The requirements mentioned SQL for "tax rates" as a potential use case.
+
+**Analysis:**
+- **No structured data in scope:** The knowledge base consists of PDF documents (unstructured text)
+- **No tax calculations required:** Queries are informational ("What is X?"), not computational ("Calculate tax for...")
+- **Vector DB sufficient:** All information retrievable via semantic search
+
+**Decision:** SQL database would add complexity without providing value for this use case. If future requirements include:
+- Structured tax rate tables for dynamic calculations
+- Relational queries across countries
+- Financial computations
+
+Then SQL (PostgreSQL) can be integrated via the existing factory pattern without refactoring the core architecture.
+
+**Prepared for extension:** The modular design allows adding SQL alongside vector and graph databases as needed.
+
 ### Why Lambda Container Image?
 
 **Challenge:** Dependencies exceed 250MB Lambda layer limit.
@@ -620,14 +638,6 @@ See [test_results.md](test_results.md) for comprehensive test report.
 - Cloud-agnostic: No vendor lock-in
 - Production-ready from day 1
 
-### Why Titan v2 (1024 dims)?
-
-Initial configuration targeted 1536 dimensions based on incomplete information. Testing revealed:
-- Titan v2 generates 1024 dimensions (not 1536)
-- 1024 dims provides excellent accuracy for this use case
-- Smaller vector size = faster search, lower storage
-
-**Lesson:** Always verify technical specifications against official documentation.
 
 ---
 
