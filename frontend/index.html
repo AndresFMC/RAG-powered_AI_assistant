@@ -266,7 +266,6 @@
                         <option value="italy">Italy</option>
                         <option value="georgia">Georgia</option>
                     </select>
-                    
                 </div>
                 
                 <div class="form-group">
@@ -347,7 +346,11 @@
                     })
                 });
                 
+                // Check response status BEFORE parsing JSON
                 if (!response.ok) {
+                    loading.classList.remove('active');
+                    submitBtn.disabled = false;
+                    
                     if (response.status === 403) {
                         showError('Invalid API key or rate limit exceeded. Please verify your API key and try again.');
                         return;
@@ -379,7 +382,8 @@
                     showResult(data);
                 }
             } catch (error) {
-                showError(error.message || 'Network error occurred');
+                // This catches network errors (CORS, connection failed, etc)
+                showError('Network error: Unable to connect to the API. Please check your connection and try again.');
             } finally {
                 loading.classList.remove('active');
                 submitBtn.disabled = false;
