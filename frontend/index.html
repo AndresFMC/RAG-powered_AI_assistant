@@ -47,6 +47,20 @@
             margin-bottom: 20px;
         }
         
+        .info-banner {
+            background: #dbeafe;
+            border-left: 4px solid #3b82f6;
+            padding: 15px;
+            border-radius: 8px;
+            margin-bottom: 25px;
+        }
+        
+        .info-banner p {
+            color: #1e40af;
+            font-size: 0.95rem;
+            line-height: 1.5;
+        }
+        
         .form-group {
             margin-bottom: 20px;
         }
@@ -58,7 +72,16 @@
             color: #333;
         }
         
-        select, textarea {
+        .help-text {
+            font-size: 0.85rem;
+            color: #666;
+            margin-top: 4px;
+        }
+        
+        input[type="password"],
+        input[type="text"],
+        select, 
+        textarea {
             width: 100%;
             padding: 12px;
             border: 2px solid #e0e0e0;
@@ -68,7 +91,10 @@
             transition: border-color 0.3s;
         }
         
-        select:focus, textarea:focus {
+        input[type="password"]:focus,
+        input[type="text"]:focus,
+        select:focus, 
+        textarea:focus {
             outline: none;
             border-color: #f97316;
         }
@@ -184,6 +210,31 @@
             border-radius: 8px;
             border-left: 4px solid #c33;
         }
+        
+        .metrics {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+            gap: 15px;
+            margin-top: 20px;
+            padding-top: 20px;
+            border-top: 2px solid #e0e0e0;
+        }
+        
+        .metric-item {
+            text-align: center;
+        }
+        
+        .metric-value {
+            font-size: 1.5rem;
+            font-weight: 700;
+            color: #f97316;
+        }
+        
+        .metric-label {
+            font-size: 0.85rem;
+            color: #666;
+            margin-top: 4px;
+        }
     </style>
 </head>
 <body>
@@ -194,7 +245,17 @@
         </header>
         
         <div class="card">
+            <div class="info-banner">
+                <p><strong>Note:</strong> This is a demonstration version. For security reasons, API access is limited. Contact me on LinkedIn for a live demonstration or temporary API access.</p>
+            </div>
+            
             <form id="queryForm">
+                <div class="form-group">
+                    <label for="apiKey">API Key</label>
+                    <input type="password" id="apiKey" placeholder="Enter your API key" required>
+                    <div class="help-text">Protected by AWS API Gateway with rate limiting (200 req/day)</div>
+                </div>
+                
                 <div class="form-group">
                     <label for="country">Select Country</label>
                     <select id="country" required>
@@ -205,6 +266,7 @@
                         <option value="italy">Italy</option>
                         <option value="georgia">Georgia</option>
                     </select>
+                    <div class="help-text"></div>
                 </div>
                 
                 <div class="form-group">
@@ -218,6 +280,21 @@
             <div class="loading" id="loading">
                 <div class="spinner"></div>
                 <p>Searching knowledge base...</p>
+            </div>
+            
+            <div class="metrics">
+                <div class="metric-item">
+                    <div class="metric-value" id="responseTime">-</div>
+                    <div class="metric-label">Response Time (s)</div>
+                </div>
+                <div class="metric-item">
+                    <div class="metric-value" id="chunksUsed">-</div>
+                    <div class="metric-label">Chunks Retrieved</div>
+                </div>
+                <div class="metric-item">
+                    <div class="metric-value" id="totalQueries">0</div>
+                    <div class="metric-label">Session Queries</div>
+                </div>
             </div>
         </div>
         
@@ -242,9 +319,12 @@
         const sourcesDiv = document.getElementById('sources');
         const submitBtn = document.getElementById('submitBtn');
         
+        let totalQueries = 0;
+        
         form.addEventListener('submit', async (e) => {
             e.preventDefault();
             
+            const apiKey = document.getElementById('apiKey').value;
             const country = document.getElementById('country').value;
             const question = document.getElementById('question').value;
             
@@ -252,11 +332,14 @@
             result.classList.remove('active');
             submitBtn.disabled = true;
             
+            const startTime = Date.now();
+            
             try {
                 const response = await fetch(API_ENDPOINT, {
                     method: 'POST',
                     headers: {
-                        'Content-Type': 'application/json'
+                        'Content-Type': 'application/json',
+                        'x-api-key': apiKey
                     },
                     body: JSON.stringify({
                         country: country,
@@ -264,7 +347,21 @@
                     })
                 });
                 
+                if (!response.ok) {
+                    if (response.status === 403) {
+                        throw new Error('Invalid API key or rate limit exceeded');
+                    }
+                    throw new Error(`HTTP error! status: ${response.status}`);
+                }
+                
                 const data = await response.json();
+                
+                // Update metrics
+                const responseTime = ((Date.now() - startTime) / 1000).toFixed(2);
+                document.getElementById('responseTime').textContent = responseTime;
+                document.getElementById('chunksUsed').textContent = data.chunks_used || 5;
+                totalQueries++;
+                document.getElementById('totalQueries').textContent = totalQueries;
                 
                 if (data.error) {
                     showError(data.error);
@@ -272,7 +369,7 @@
                     showResult(data);
                 }
             } catch (error) {
-                showError('Network error: ' + error.message);
+                showError(error.message || 'Network error occurred');
             } finally {
                 loading.classList.remove('active');
                 submitBtn.disabled = false;
