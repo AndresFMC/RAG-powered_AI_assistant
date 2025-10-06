@@ -89,7 +89,7 @@ graph TB
 | **Frontend** | S3 Static Website | HTML/CSS/JS, HTTPS enabled |
 | **API** | API Gateway REST | CORS enabled, regional |
 | **Compute** | Lambda Container Image | Python 3.12, 2048MB, 300s timeout |
-| **Orchestration** | LangChain | Modular RAG pipeline |
+| **Orchestration** | Custom RAG Core | Factory pattern, cloud-agnostic design |
 | **Vector DB** | Pinecone Serverless | 1024 dims, cosine similarity, us-east-1 |
 | **Embeddings** | Bedrock Titan v2 | amazon.titan-embed-text-v2:0 |
 | **LLM** | Bedrock Claude 3.5 Sonnet | anthropic.claude-3-5-sonnet-20240620-v1:0 |
@@ -143,21 +143,21 @@ graph TB
 
 ```
 RAG-powered_AI_assistant/
-├── rag_core/                       # Modular RAG architecture
+├── rag_core/                       # Cloud-agnostic modular architecture
 │   ├── config/
 │   │   └── settings.py            # Centralized configuration
-│   ├── interfaces/
+│   ├── interfaces/                # Abstract contracts (swap components easily)
 │   │   ├── vector_store.py        # Abstract VectorStore
 │   │   ├── llm.py                 # Abstract LLM
 │   │   └── embeddings.py          # Abstract Embeddings
-│   ├── implementations/
+│   ├── implementations/           # Concrete providers (Pinecone, Bedrock)
 │   │   ├── vector_stores/
 │   │   │   └── pinecone_store.py  # Pinecone implementation
 │   │   ├── llms/
 │   │   │   └── bedrock_llm.py     # Bedrock LLM implementation
 │   │   └── embeddings/
 │   │       └── bedrock_embeddings.py
-│   ├── factories/
+│   ├── factories/                 # Component selection logic
 │   │   ├── vector_store_factory.py
 │   │   ├── llm_factory.py
 │   │   └── embeddings_factory.py
@@ -434,12 +434,13 @@ See [test_results.md](test_results.md) for comprehensive test report.
 
 ### Why Modular Architecture?
 
-**Design:** 3-layer architecture (Application → Interface → Implementation)
+**Design:** Factory pattern with 3-layer architecture (Application → Interface → Implementation)
 
 **Benefits:**
 - Swap Pinecone for Qdrant: Change 1 config line
 - Swap Bedrock for vLLM: Change 1 config line
 - Business logic untouched
+- Cloud-agnostic: No vendor lock-in
 - Production-ready from day 1
 
 ### Why Titan v2 (1024 dims)?
