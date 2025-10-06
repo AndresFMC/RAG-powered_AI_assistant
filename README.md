@@ -13,7 +13,7 @@ Intelligent employment regulations assistant using RAG (Retrieval-Augmented Gene
 
 **API Endpoint:** `https://sycfgthg0g.execute-api.eu-central-1.amazonaws.com/prod/query`
 
-Experience real-time RAG technology with namespace-isolated knowledge retrieval across 5 countries.
+Experience real-time RAG technology with namespace-isolated knowledge retrieval across 5 countries. API access requires authentication key (provided to evaluators separately).
 
 ---
 
@@ -44,42 +44,137 @@ The system uses **Pinecone namespaces** to guarantee that queries to Spain only 
 
 ## Architecture
 
+The system consists of two distinct phases: **Index Building** (offline, one-time) and **Query Runtime** (online, per request).
+
+### Phase 1: Index Building (Offline)
+
 ```mermaid
 graph TB
-    subgraph "Data Layer"
-        A[PDF Documents] -->|5 Countries| B[Document Processing]
-        B --> C[Text Chunking<br/>1000 chars, 200 overlap]
-        C --> D[Bedrock Titan v2<br/>Embeddings]
+    subgraph "Data Source"
+        A[PDF Documents<br/>15 files, 5 countries]
     end
     
-    subgraph "Vector Database"
-        D -->|231 vectors| E[Pinecone Serverless]
-        E --> F1[spain namespace<br/>49 vectors]
-        E --> F2[poland namespace<br/>46 vectors]
-        E --> F3[colombia namespace<br/>49 vectors]
-        E --> F4[italy namespace<br/>44 vectors]
-        E --> F5[georgia namespace<br/>43 vectors]
+    subgraph "build_index.py Script"
+        B[IndexBuilder.init]
+        B --> C[get_vector_store<br/>Factory: Pinecone]
+        B --> D[get_embeddings<br/>Factory: Titan v2]
+        B --> E[RecursiveTextSplitter<br/>chunk: 1000, overlap: 200]
     end
     
-    subgraph "Query Flow"
-        G[User Query] --> H[S3 Static Frontend]
-        H --> I[API Gateway<br/>REST API]
-        I --> J[Lambda Container<br/>2048MB, 300s]
-        J --> K[RAG Pipeline]
-        K -->|1. Generate Embedding| L[Bedrock Titan v2]
-        K -->|2. Search Namespace| F1
-        K -->|3. Retrieve Context| M[Top 5 Chunks]
-        M --> N[Context Assembly]
-        N -->|4. Generate Answer| O[Bedrock Claude 3.5<br/>Sonnet]
-        O --> P[Response + Sources]
-        P --> H
+    subgraph "Processing Pipeline"
+        F[PyPDFLoader<br/>Load PDFs]
+        G[text_splitter.split<br/>Generate chunks]
+        H[Add metadata<br/>country, file, page]
+        I[embed_query<br/>Per chunk]
     end
     
-    style F1 fill:#fee
-    style F2 fill:#efe
-    style F3 fill:#fef
-    style F4 fill:#eff
-    style F5 fill:#ffe
+    subgraph "AWS Bedrock"
+        J[Titan v2<br/>1024 dimensions]
+    end
+    
+    subgraph "Vector Preparation"
+        K[Prepare vectors<br/>id, values, metadata]
+        L[vector_store.upsert<br/>Batch by namespace]
+    end
+    
+    subgraph "Pinecone Namespaces"
+        M1[spain: 49 vectors]
+        M2[poland: 46 vectors]
+        M3[colombia: 49 vectors]
+        M4[italy: 44 vectors]
+        M5[georgia: 43 vectors]
+    end
+    
+    A --> F
+    F --> G
+    G --> H
+    H --> I
+    I --> J
+    J --> K
+    K --> L
+    L --> M1
+    L --> M2
+    L --> M3
+    L --> M4
+    L --> M5
+    
+    style M1 fill:#fee
+    style M2 fill:#efe
+    style M3 fill:#fef
+    style M4 fill:#eff
+    style M5 fill:#ffe
+```
+
+### Phase 2: Query Runtime (Online)
+
+```mermaid
+graph TB
+    subgraph "User Interface"
+        A[User: select country<br/>+ enter question]
+        B[S3 Static Frontend<br/>index.html]
+    end
+    
+    subgraph "AWS Infrastructure"
+        C[API Gateway<br/>API Key validation<br/>Rate limiting]
+        D[Lambda Container<br/>2048MB, 300s timeout]
+    end
+    
+    subgraph "RAGPipeline.query Method"
+        E[Step 1: Validate country]
+        F[Step 2: embeddings.embed_query<br/>Question → vector]
+        G[Step 3: vector_store.search<br/>Query namespace]
+        H[Step 4: Extract chunks<br/>+ metadata]
+        I[Step 5: llm.generate_with_context<br/>Question + Context]
+        J[Step 6: Format response<br/>answer + sources + metadata]
+    end
+    
+    subgraph "AWS Bedrock"
+        K[Titan v2<br/>Embedding generation]
+        L[Claude 3.5 Sonnet<br/>Answer generation]
+    end
+    
+    subgraph "Pinecone Query"
+        M{Namespace<br/>Router}
+        N1[spain namespace]
+        N2[poland namespace]
+        N3[colombia namespace]
+        N4[italy namespace]
+        N5[georgia namespace]
+        O[Top-K results<br/>default: 5]
+    end
+    
+    A --> B
+    B -->|POST + x-api-key| C
+    C --> D
+    D --> E
+    E --> F
+    F --> K
+    K --> G
+    G --> M
+    M -->|country=spain| N1
+    M -->|country=poland| N2
+    M -->|country=colombia| N3
+    M -->|country=italy| N4
+    M -->|country=georgia| N5
+    N1 --> O
+    N2 --> O
+    N3 --> O
+    N4 --> O
+    N5 --> O
+    O --> H
+    H --> I
+    I --> L
+    L --> J
+    J --> D
+    D --> C
+    C --> B
+    B --> A
+    
+    style N1 fill:#fee
+    style N2 fill:#efe
+    style N3 fill:#fef
+    style N4 fill:#eff
+    style N5 fill:#ffe
 ```
 
 ### Technical Stack
@@ -87,7 +182,7 @@ graph TB
 | Component | Technology | Configuration |
 |-----------|-----------|---------------|
 | **Frontend** | S3 Static Website | HTML/CSS/JS, HTTPS enabled |
-| **API** | API Gateway REST | CORS enabled, regional |
+| **API** | API Gateway REST | CORS enabled, API key protected |
 | **Compute** | Lambda Container Image | Python 3.12, 2048MB, 300s timeout |
 | **Orchestration** | Custom RAG Core | Factory pattern, cloud-agnostic design |
 | **Vector DB** | Pinecone Serverless | 1024 dims, cosine similarity, us-east-1 |
@@ -106,8 +201,8 @@ graph TB
 - **Test results:** 100% isolation verified across all countries
 
 ### Performance
-- **Cold start:** 4.75s (Lambda container initialization)
-- **Warm start:** 2.92s (subsequent requests)
+- **Cold start:** 7-8.5s (Lambda container initialization)
+- **Warm start:** 2.5-3s (subsequent requests)
 - **Vector search:** ~300ms (Pinecone serverless)
 - **LLM generation:** ~2.1s (Claude 3.5 Sonnet)
 
@@ -122,6 +217,12 @@ graph TB
 - 231 vectors across 5 namespaces
 - Supports thousands of concurrent queries
 - No infrastructure management required
+
+### Security
+- AWS API Gateway key authentication
+- Rate limiting: 200 requests/day per key
+- Burst protection: 20 req/sec, sustained 10 req/sec
+- CloudWatch monitoring and logging
 
 ---
 
@@ -290,13 +391,32 @@ aws lambda create-function \
   --region eu-central-1
 ```
 
-### 7. Create API Gateway
+### 7. Create API Gateway with API Key Protection
 
 ```bash
-# Create REST API and configure resources/methods
-# See deployment guide in docs/ for detailed steps
-# Final endpoint: https://{api-id}.execute-api.eu-central-1.amazonaws.com/prod/query
+# Create REST API
+aws apigateway create-rest-api \
+  --name "rag-powered-ai-assistant-api" \
+  --region eu-central-1
+
+# Create API Key
+aws apigateway create-api-key \
+  --name "rag-demo-key" \
+  --enabled \
+  --region eu-central-1
+
+# Create Usage Plan with rate limits
+aws apigateway create-usage-plan \
+  --name "rag-demo-plan" \
+  --throttle burstLimit=20,rateLimit=10 \
+  --quota limit=200,period=DAY \
+  --region eu-central-1
+
+# Associate API key to usage plan and stage
+# (See full deployment commands in deployment documentation)
 ```
+
+**Note:** Complete API Gateway setup includes creating resources, methods, integrations, and CORS configuration. The API will require `x-api-key` header for all requests.
 
 ### 8. Deploy Frontend
 
@@ -308,12 +428,51 @@ aws lambda create-function \
 
 ---
 
+## Security & Authentication
+
+The API is protected by **AWS API Gateway API Keys** with infrastructure-level rate limiting.
+
+### Rate Limits
+
+| Limit Type | Value |
+|------------|-------|
+| Requests per day | 200 |
+| Burst rate | 20 req/sec |
+| Sustained rate | 10 req/sec |
+
+### Authentication Flow
+
+1. User enters API key in frontend
+2. Frontend includes key in `x-api-key` header
+3. API Gateway validates key before routing to Lambda
+4. Invalid/missing keys receive 403 Forbidden
+
+### Why API Gateway Keys?
+
+This implementation demonstrates:
+- **Infrastructure-level security** via AWS native services
+- **Rate limiting** to prevent abuse and control costs
+- **Key rotation** capability without code changes
+- **Usage tracking** and monitoring via CloudWatch
+
+### Production Considerations
+
+For production deployments, consider:
+- Backend proxy to hide keys from client
+- OAuth 2.0 / JWT authentication
+- Per-user quotas and throttling
+- Key expiration policies
+
+---
+
 ## API Usage
 
 ### Endpoint
 ```
 POST https://sycfgthg0g.execute-api.eu-central-1.amazonaws.com/prod/query
 ```
+
+**Authentication:** All requests require `x-api-key` header.
 
 ### Request Format
 
@@ -355,6 +514,7 @@ POST https://sycfgthg0g.execute-api.eu-central-1.amazonaws.com/prod/query
 curl -X POST \
   "https://sycfgthg0g.execute-api.eu-central-1.amazonaws.com/prod/query" \
   -H "Content-Type: application/json" \
+  -H "x-api-key: YOUR_API_KEY_HERE" \
   -d '{"country":"poland","question":"What are the mandatory vacation days?"}'
 ```
 
@@ -364,6 +524,7 @@ curl -X POST \
 curl -X POST \
   "https://sycfgthg0g.execute-api.eu-central-1.amazonaws.com/prod/query" \
   -H "Content-Type: application/json" \
+  -H "x-api-key: YOUR_API_KEY_HERE" \
   -d '{"action":"stats"}'
 ```
 
@@ -379,6 +540,22 @@ curl -X POST \
     "georgia": {"vector_count": 43}
   },
   "countries": ["spain", "poland", "colombia", "italy", "georgia"]
+}
+```
+
+### Error Responses
+
+**403 Forbidden** (Invalid or missing API key):
+```json
+{
+  "message": "Forbidden"
+}
+```
+
+**400 Bad Request** (Missing required fields):
+```json
+{
+  "error": "Missing required fields: country and question"
 }
 ```
 
@@ -423,7 +600,7 @@ See [test_results.md](test_results.md) for comprehensive test report.
 
 ### Why Lambda Container Image?
 
-**Challenge:** LangChain + dependencies exceed 250MB Lambda layer limit.
+**Challenge:** Dependencies exceed 250MB Lambda layer limit.
 
 **Solution:** Container image deployment (10GB limit vs 250MB).
 
@@ -484,19 +661,20 @@ Initial configuration targeted 1536 dimensions based on incomplete information. 
 ## Limitations & Future Enhancements
 
 ### Current Limitations
-1. **Fixed countries:** 5 hardcoded countries (not dynamic)
-2. **No authentication:** API publicly accessible
-3. **No rate limiting:** Potential for abuse
-4. **No caching:** Every query hits full RAG pipeline
-5. **English only:** UI and responses in English
+1. **Fixed countries:** 5 hardcoded countries (not dynamic namespace creation)
+2. **Single API key tier:** No per-user quotas or tiered access
+3. **No caching:** Every query hits full RAG pipeline
+4. **English only:** UI and responses in English
+5. **No conversation history:** Stateless queries only
 
 ### Planned Enhancements
-- API key authentication
 - Dynamic country/namespace management
-- Response caching (Redis)
+- Per-user authentication with tiered access
+- Response caching (Redis/ElastiCache)
 - Multi-language support
-- Graph DB integration for relationship queries
+- Conversation context and history
 - Advanced analytics dashboard
+- Graph DB integration for relationship queries
 
 ---
 
@@ -531,6 +709,11 @@ Error: Vector dimension 1024 does not match index 1536
 **Solution:** Recreate index with dimension=1024
 
 ### API Gateway Issues
+
+**403 Forbidden:**
+- Verify API key is valid and enabled
+- Check usage plan association
+- Confirm API deployed to correct stage
 
 **CORS errors:**
 - Verify OPTIONS method configured
@@ -580,7 +763,7 @@ python scripts/build_index.py
 
 Contributions welcome! Areas for improvement:
 - Additional countries/jurisdictions
-- Authentication system
+- Enhanced authentication system
 - Caching layer
 - Multi-language support
 - Advanced search filters
@@ -603,4 +786,4 @@ MIT License - see [LICENSE](LICENSE) file for details.
 
 ---
 
-**Built with:** AWS Lambda • Amazon Bedrock • Pinecone • LangChain • Python 3.12
+**Built with:** AWS Lambda • Amazon Bedrock • Pinecone • Python 3.12
