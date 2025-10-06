@@ -177,7 +177,95 @@ graph TB
     style N5 fill:#ffe
 ```
 
-### Technical Stack
+---
+
+## Modular Architecture Explained
+
+The system is built using a **3-layer factory pattern** that enables technology and cloud provider agnosticism.
+
+### Architecture Layers
+
+**1. Interface Layer** (`rag_core/interfaces/`)
+
+Defines abstract contracts that any implementation must follow:
+- `VectorStore` - Abstract base class for vector databases
+- `Embeddings` - Abstract base class for embedding models
+- `LLM` - Abstract base class for language models
+
+These interfaces specify **what** operations are needed (e.g., `search()`, `embed_query()`, `generate()`) without dictating **how** they're implemented.
+
+**2. Factory Layer** (`rag_core/factories/`)
+
+Dynamically selects and instantiates concrete implementations based on configuration:
+- `vector_store_factory.py` - Returns configured vector store
+- `embeddings_factory.py` - Returns configured embedding model
+- `llm_factory.py` - Returns configured LLM
+
+Factories read from `settings.py`:
+```python
+VECTOR_STORE_TYPE = "pinecone"  # Could be "qdrant", "weaviate", etc.
+EMBEDDINGS_TYPE = "bedrock"     # Could be "openai", "huggingface", etc.
+LLM_TYPE = "bedrock"            # Could be "vllm", "anthropic", etc.
+```
+
+**3. Implementation Layer** (`rag_core/implementations/`)
+
+Concrete providers that implement the abstract interfaces:
+- `PineconeStore` - Implements `VectorStore` for Pinecone
+- `BedrockEmbeddings` - Implements `Embeddings` for AWS Bedrock Titan
+- `BedrockLLM` - Implements `LLM` for AWS Bedrock Claude
+
+### How It Works
+
+```python
+# Application code (rag_pipeline.py, build_index.py)
+from rag_core.factories import get_vector_store, get_embeddings, get_llm
+
+# Factories return implementations based on config
+vector_store = get_vector_store()  # Returns PineconeStore
+embeddings = get_embeddings()      # Returns BedrockEmbeddings
+llm = get_llm()                    # Returns BedrockLLM
+
+# Application uses abstract interfaces, not concrete classes
+results = vector_store.search(query_vector, namespace="spain")
+answer = llm.generate_with_context(question, context)
+```
+
+The core RAG logic **never** imports `PineconeStore`, `BedrockEmbeddings`, or `BedrockLLM` directly. It only uses abstract interfaces.
+
+### Why This Makes It Cloud-Agnostic
+
+**Swapping Providers Requires Zero Code Changes:**
+
+To switch from Pinecone to Qdrant:
+1. Create `QdrantStore` class implementing `VectorStore` interface
+2. Update `settings.py`: `VECTOR_STORE_TYPE = "qdrant"`
+3. Done - No changes to `rag_pipeline.py` or any application code
+
+To switch from Bedrock to OpenAI:
+1. Create `OpenAIEmbeddings` and `OpenAILLM` classes
+2. Update `settings.py`: `EMBEDDINGS_TYPE = "openai"`, `LLM_TYPE = "openai"`
+3. Done - No changes to business logic
+
+### Technology Agnostic
+
+The same pattern works for any technology choice:
+- **Vector DBs:** Pinecone → Qdrant → Weaviate → ChromaDB → Milvus
+- **Embeddings:** Bedrock Titan → OpenAI → Cohere → HuggingFace
+- **LLMs:** Bedrock Claude → OpenAI GPT → vLLM → Anthropic API
+
+### Production Benefits
+
+1. **No Vendor Lock-in:** Switch cloud providers without rewriting application logic
+2. **Easy Testing:** Mock implementations for unit tests without external dependencies
+3. **Gradual Migration:** Run multiple implementations simultaneously during migrations
+4. **Cost Optimization:** Compare providers by swapping implementations with same data
+
+This architecture is production-ready and used in enterprise systems where vendor flexibility and testability are critical.
+
+---
+
+## Technical Stack
 
 | Component | Technology | Configuration |
 |-----------|-----------|---------------|
@@ -201,8 +289,8 @@ graph TB
 - **Test results:** 100% isolation verified across all countries
 
 ### Performance
-- **Cold start:** 7-8.5s (Lambda container initialization)
-- **Warm start:** 2.5-3s (subsequent requests)
+- **Cold start:** 8-12s (Lambda container initialization, varies by load)
+- **Warm start:** 2-4s (subsequent requests)
 - **Vector search:** ~300ms (Pinecone serverless)
 - **LLM generation:** ~2.1s (Claude 3.5 Sonnet)
 
@@ -342,14 +430,12 @@ TOP_K_RESULTS=5
 
 ### 4. Create Pinecone Index
 
-```bash
-# Via Pinecone Console:
-# - Name: rag-powered-ai-assistant
-# - Dimension: 1024 (Titan v2)
-# - Metric: cosine
-# - Cloud: AWS
-# - Region: us-east-1 (free tier)
-```
+Via Pinecone Console:
+- **Name:** `rag-powered-ai-assistant`
+- **Dimension:** 1024 (Titan v2)
+- **Metric:** cosine
+- **Cloud:** AWS
+- **Region:** us-east-1 (free tier)
 
 ### 5. Index Documents to Pinecone
 
@@ -364,7 +450,6 @@ python scripts/build_index.py
 
 ```bash
 # Build Docker image (M1 Mac: use --platform linux/amd64)
-cd RAG-powered_AI_assistant
 docker build --platform linux/amd64 \
   -f lambda_function/Dockerfile \
   -t rag-powered-ai-assistant:latest .
@@ -413,10 +498,11 @@ aws apigateway create-usage-plan \
   --region eu-central-1
 
 # Associate API key to usage plan and stage
-# (See full deployment commands in deployment documentation)
+# Configure resources, methods, integrations, and CORS
+# See AWS documentation for complete API Gateway setup
 ```
 
-**Note:** Complete API Gateway setup includes creating resources, methods, integrations, and CORS configuration. The API will require `x-api-key` header for all requests.
+**Note:** The API requires `x-api-key` header for all requests.
 
 ### 8. Deploy Frontend
 
@@ -449,7 +535,6 @@ The API is protected by **AWS API Gateway API Keys** with infrastructure-level r
 
 ### Why API Gateway Keys?
 
-This implementation demonstrates:
 - **Infrastructure-level security** via AWS native services
 - **Rate limiting** to prevent abuse and control costs
 - **Key rotation** capability without code changes
@@ -559,6 +644,13 @@ curl -X POST \
 }
 ```
 
+**429 Too Many Requests** (Rate limit exceeded):
+```json
+{
+  "message": "Too Many Requests"
+}
+```
+
 ---
 
 ## Testing Results
@@ -573,15 +665,15 @@ See [test_results.md](test_results.md) for comprehensive test report.
 - Zero cross-contamination across all 5 countries
 
 **Performance Metrics:**
-- Cold start: 4.75s (within target)
-- Warm start: 2.92s (excellent)
-- Vector search: ~300ms
-- End-to-end: <5s average
+- Cold start: 8-12s (Lambda container initialization)
+- Warm start: 2-4s (subsequent requests)
+- Vector search: ~300ms (Pinecone serverless)
+- End-to-end: <5s average for warm starts
 
 **Error Handling:**
-- Invalid country: ✓ Proper error message
-- Empty question: ✓ Validation works
-- Irrelevant questions: ✓ Acknowledges lack of context
+- Invalid country: Proper error message
+- Empty question: Validation works
+- Irrelevant questions: Acknowledges lack of context
 
 ---
 
@@ -592,29 +684,33 @@ See [test_results.md](test_results.md) for comprehensive test report.
 **Requirement:** Guarantee zero cross-contamination between countries.
 
 **Evaluation:**
-- **Graph DB:** Adds complexity without addressing isolation need
+- **Graph DB:** Adds complexity without addressing isolation requirement
 - **SQL Database:** Not optimized for vector similarity search
 - **Pinecone Namespaces:** Native isolation at infrastructure level
 
-**Decision:** Pinecone with namespace-per-country architecture ensures impossible cross-contamination while maintaining cloud-agnostic design.
+**Decision:** Pinecone with namespace-per-country architecture ensures impossible cross-contamination while maintaining cloud-agnostic design through the factory pattern.
+
+### Why No Graph DB?
+
+**Context:** The requirement mentioned Graph DB as a suggestion for preventing rule confusion between countries.
+
+**Analysis:**
+- Graph DBs excel at **relationship queries** (e.g., "How does policy X affect regulation Y?")
+- This use case requires **isolation**, not relationship exploitation
+- Graph DB would add complexity without solving the core problem
+
+**Decision:** Namespaces provide perfect isolation. If future requirements include cross-country relationship queries, Graph DB can be added alongside vector DB using the existing modular architecture.
 
 ### Why No SQL Database?
 
-**Evaluation:** The requirements mentioned SQL for "tax rates" as a potential use case.
+**Context:** The requirement mentioned SQL for "tax rates" as a potential use case.
 
 **Analysis:**
-- **No structured data in scope:** The knowledge base consists of PDF documents (unstructured text)
-- **No tax calculations required:** Queries are informational ("What is X?"), not computational ("Calculate tax for...")
+- **No structured data in scope:** Knowledge base consists of unstructured PDF documents
+- **No calculations required:** Queries are informational, not computational
 - **Vector DB sufficient:** All information retrievable via semantic search
 
-**Decision:** SQL database would add complexity without providing value for this use case. If future requirements include:
-- Structured tax rate tables for dynamic calculations
-- Relational queries across countries
-- Financial computations
-
-Then SQL (PostgreSQL) can be integrated via the existing factory pattern without refactoring the core architecture.
-
-**Prepared for extension:** The modular design allows adding SQL alongside vector and graph databases as needed.
+**Decision:** SQL database would add complexity without providing value. The modular design allows adding SQL alongside vector storage if future requirements include structured data or calculations.
 
 ### Why Lambda Container Image?
 
@@ -629,15 +725,14 @@ Then SQL (PostgreSQL) can be integrated via the existing factory pattern without
 
 ### Why Modular Architecture?
 
-**Design:** Factory pattern with 3-layer architecture (Application → Interface → Implementation)
+**Design:** Factory pattern with 3-layer architecture (Interface → Factory → Implementation)
 
 **Benefits:**
-- Swap Pinecone for Qdrant: Change 1 config line
-- Swap Bedrock for vLLM: Change 1 config line
-- Business logic untouched
-- Cloud-agnostic: No vendor lock-in
+- Swap providers without code changes (change 1 config line)
+- Zero vendor lock-in
+- Easy unit testing with mock implementations
 - Production-ready from day 1
-
+- Enables gradual migrations and A/B testing between providers
 
 ---
 
@@ -672,19 +767,16 @@ Then SQL (PostgreSQL) can be integrated via the existing factory pattern without
 
 ### Current Limitations
 1. **Fixed countries:** 5 hardcoded countries (not dynamic namespace creation)
-2. **Single API key tier:** No per-user quotas or tiered access
-3. **No caching:** Every query hits full RAG pipeline
-4. **English only:** UI and responses in English
-5. **No conversation history:** Stateless queries only
+2. **No caching:** Every query hits full RAG pipeline
+3. **Stateless:** No conversation history or context
+4. **Single language:** UI and responses in English only
 
 ### Planned Enhancements
 - Dynamic country/namespace management
-- Per-user authentication with tiered access
 - Response caching (Redis/ElastiCache)
-- Multi-language support
 - Conversation context and history
+- Multi-language support
 - Advanced analytics dashboard
-- Graph DB integration for relationship queries
 
 ---
 
@@ -692,7 +784,7 @@ Then SQL (PostgreSQL) can be integrated via the existing factory pattern without
 
 ### Lambda Issues
 
-**Cold start >10s:**
+**Cold start >15s:**
 - Check container image size
 - Verify Lambda memory (2048MB recommended)
 - Review CloudWatch logs for initialization errors
@@ -701,8 +793,8 @@ Then SQL (PostgreSQL) can be integrated via the existing factory pattern without
 ```bash
 # Verify dependencies match
 pip freeze > requirements.txt
-# Rebuild container
-docker build --no-cache ...
+# Rebuild container with no cache
+docker build --no-cache -f lambda_function/Dockerfile .
 ```
 
 ### Pinecone Issues
@@ -711,12 +803,6 @@ docker build --no-cache ...
 - Verify API key in environment variables
 - Check index name matches configuration
 - Confirm region is us-east-1 (free tier)
-
-**Dimension mismatch:**
-```
-Error: Vector dimension 1024 does not match index 1536
-```
-**Solution:** Recreate index with dimension=1024
 
 ### API Gateway Issues
 
@@ -734,51 +820,6 @@ Error: Vector dimension 1024 does not match index 1536
 - Verify API endpoint URL
 - Check resource path: `/query`
 - Confirm Lambda integration configured
-
----
-
-## Development
-
-### Local Testing
-
-```bash
-# Test RAG pipeline locally
-python test_rag_local.py
-
-# Expected output:
-# RAG Pipeline initialized
-# Countries: ['spain', 'poland', ...]
-# Query test passed
-```
-
-### Update Frontend
-
-```bash
-# Edit frontend/index.html
-# Deploy changes
-./scripts/deploy_frontend.sh
-```
-
-### Rebuild Index
-
-```bash
-# Add new PDFs to data/{country}/
-# Reindex
-python scripts/build_index.py
-```
-
----
-
-## Contributing
-
-Contributions welcome! Areas for improvement:
-- Additional countries/jurisdictions
-- Enhanced authentication system
-- Caching layer
-- Multi-language support
-- Advanced search filters
-
-Please open an issue before starting major work.
 
 ---
 
