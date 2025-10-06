@@ -383,7 +383,7 @@
                 }
             } catch (error) {
                 // This catches network errors (CORS, connection failed, etc)
-                showError('Network error: Unable to connect to the API. Please check your connection and try again.');
+                showError('Network error: Unable to connect to the API. Please check your connection, your API Key and try again.');
             } finally {
                 loading.classList.remove('active');
                 submitBtn.disabled = false;
