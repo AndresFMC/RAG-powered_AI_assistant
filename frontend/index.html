@@ -266,7 +266,7 @@
                         <option value="italy">Italy</option>
                         <option value="georgia">Georgia</option>
                     </select>
-                    <div class="help-text"></div>
+                    
                 </div>
                 
                 <div class="form-group">
@@ -349,9 +349,19 @@
                 
                 if (!response.ok) {
                     if (response.status === 403) {
-                        throw new Error('Invalid API key or rate limit exceeded');
+                        showError('Invalid API key or rate limit exceeded. Please verify your API key and try again.');
+                        return;
                     }
-                    throw new Error(`HTTP error! status: ${response.status}`);
+                    if (response.status === 429) {
+                        showError('Rate limit exceeded. Please wait a moment before trying again.');
+                        return;
+                    }
+                    if (response.status === 400) {
+                        showError('Invalid request. Please check your country selection and question.');
+                        return;
+                    }
+                    showError(`API error (${response.status}). Please try again later.`);
+                    return;
                 }
                 
                 const data = await response.json();
