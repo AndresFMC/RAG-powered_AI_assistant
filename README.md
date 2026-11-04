@@ -17,6 +17,8 @@ Experience real-time RAG technology with namespace-isolated knowledge retrieval 
 
 ---
 
+> **Model update (Nov 2026):** AWS retired the Claude 3.x models, including Claude 3.5 Sonnet, on Amazon Bedrock, so this project now calls **Claude Haiku 5.5** through the EU cross-region inference profile `eu.anthropic.claude-haiku-5-5` (Frankfurt has no in-region capacity for it). The model is read from the `BEDROCK_LLM_MODEL` environment variable. Latency and cost figures further down were measured with the original model. If the Lambda role restricts `bedrock:InvokeModel` to specific ARNs, it must allow both the inference profile and the Claude Haiku 5.5 foundation model in the EU regions the profile routes to.
+
 ## Problem Statement
 
 Organizations operating across multiple countries face challenges accessing accurate, jurisdiction-specific employment regulations. Traditional documentation systems:
@@ -130,7 +132,7 @@ graph TB
     
     subgraph "AWS Bedrock"
         K[Titan v2<br/>Embedding generation]
-        L[Claude 3.5 Sonnet<br/>Answer generation]
+        L[Claude Haiku 5.5<br/>Answer generation]
     end
     
     subgraph "Pinecone Query"
@@ -275,7 +277,7 @@ This architecture is production-ready and used in enterprise systems where vendo
 | **Orchestration** | Custom RAG Core | Factory pattern, cloud-agnostic design |
 | **Vector DB** | Pinecone Serverless | 1024 dims, cosine similarity, us-east-1 |
 | **Embeddings** | Bedrock Titan v2 | amazon.titan-embed-text-v2:0 |
-| **LLM** | Bedrock Claude 3.5 Sonnet | anthropic.claude-3-5-sonnet-20240620-v1:0 |
+| **LLM** | Bedrock Claude Haiku 5.5 | eu.anthropic.claude-haiku-5-5 |
 | **Monitoring** | CloudWatch Logs | Lambda execution logs |
 
 ---
@@ -415,7 +417,7 @@ AWS_REGION=eu-central-1
 
 # Bedrock Models
 BEDROCK_EMBEDDING_MODEL=amazon.titan-embed-text-v2:0
-BEDROCK_LLM_MODEL=anthropic.claude-3-5-sonnet-20240620-v1:0
+BEDROCK_LLM_MODEL=eu.anthropic.claude-haiku-5-5
 
 # Component Selection
 VECTOR_STORE_TYPE=pinecone

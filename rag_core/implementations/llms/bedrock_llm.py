@@ -26,7 +26,7 @@ class BedrockLLM(LLMInterface):
         """
         self.model_id = model_id or os.getenv(
             'BEDROCK_LLM_MODEL',
-            'anthropic.claude-3-5-sonnet-20240620-v1:0'
+            'eu.anthropic.claude-haiku-5-5'
         )
         self.region_name = region_name or os.getenv('AWS_REGION', 'eu-central-1')
         
