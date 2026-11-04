@@ -29,7 +29,7 @@ class Settings:
     LLM_TYPE: str = os.getenv('LLM_TYPE', 'bedrock')
     BEDROCK_LLM_MODEL: str = os.getenv(
         'BEDROCK_LLM_MODEL',
-        'anthropic.claude-3-5-sonnet-20240620-v1:0'
+        'eu.anthropic.claude-haiku-5-5'
     )
     
     # AWS Configuration
